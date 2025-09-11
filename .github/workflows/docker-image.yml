@@ -12,13 +12,12 @@ jobs:
 
     steps:
       - name: Checkout
+      # Shallow clone is fine; unshallow not needed for Docker context
         uses: actions/checkout@v4
 
-      # Optional but recommended: use Buildx for better caching/features
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # Cache Docker layers between runs
       - name: Cache Docker layers
         uses: actions/cache@v4
         with:
@@ -27,8 +26,46 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-buildx-
 
-      # Build all services defined in docker-compose.yml
       - name: Build (docker compose)
         run: |
-          docker compose build \
-            --build-arg BUILDKIT_INLINE_CACHE=1
+          docker compose build --build-arg BUILDKIT_INLINE_CACHE=1
+
+      # Package each built service image as a compressed tarball artifact
+      - name: Export images to artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          # List services from compose file
+          services=$(docker compose config --services)
+          for s in $services; do
+            # Get image ID for the service
+            img_id=$(docker compose images --quiet "$s")
+            if [ -z "$img_id" ]; then
+              echo "No image found for service $s" >&2
+              exit 1
+            fi
+            # Derive a filename: <service>.tar.gz
+            fname="out/${s}.tar"
+            echo "Saving $s ($img_id) -> ${fname}.gz"
+            docker save -o "$fname" "$img_id"
+            gzip -9 "$fname"
+          done
+          ls -lh out
+
+      - name: Upload image artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-images-${{ github.run_id }}
+          path: out/*.tar.gz
+          if-no-files-found: error
+          compression-level: 0   # already gzipped
+
+      # Optional: also keep build logs as a small artifact
+      - name: Compose config for debugging
+        run: docker compose config > compose.effective.yml
+
+      - name: Upload compose config
+        uses: actions/upload-artifact@v4
+        with:
+          name: compose-effective-${{ github.run_id }}
+          path: compose.effective.yml
