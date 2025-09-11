@@ -1,0 +1,23 @@
+version: "3.8"
+services:
+  enviroplus:
+    build: .
+    container_name: piEnviro
+    image: piEnviro:0.1
+    # Access to hardware interfaces
+    devices:
+      - /dev/i2c-1:/dev/i2c-1
+      - /dev/spidev0.0:/dev/spidev0.0
+      - /dev/spidev0.1:/dev/spidev0.1
+      - /dev/gpiomem:/dev/gpiomem
+      # If you have the PMS5003 particulate sensor, expose the UART used on your Pi:
+      - /dev/ttyAMA0:/dev/ttyAMA0
+      # On some models it may be /dev/ttyS0 instead:
+      # - /dev/ttyS0:/dev/ttyS0
+    # Simplest option to avoid permission hassles with GPIO/SPI/I2C
+    privileged: true
+    # Helpful if your example prints progress continuously
+    tty: true
+    restart: unless-stopped
+  environment:
+    EXAMPLE: enviroMultiClient.py
