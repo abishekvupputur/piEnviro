@@ -5,7 +5,8 @@ ENV PYTHONUNBUFFERED=1 \
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential python3-dev i2c-tools \
-    libatlas-base-dev libjpeg62-turbo libopenjp2-7 libtiff6 zlib1g \
+    libjpeg62-turbo libopenjp2-7 zlib1g \
+    libasound2 libportaudio2\
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/enviroplus
@@ -16,7 +17,12 @@ COPY . .
 # Install from local source
 RUN python -m pip install --prefer-binary .
 
+RUN if [ -f requirements-examples.txt ]; then \
+      python -m pip install --prefer-binary -r requirements-examples.txt; \
+    fi
+RUN python -m pip install --prefer-binary sounddevice
+
+
 WORKDIR /opt/enviroplus/examples
 
-CMD ["bash", "-lc", "python \"${EXAMPLE:-all-in-one.py}\""]
-
+CMD ["python3", "enviroMultiClient.py"]
