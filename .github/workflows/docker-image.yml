@@ -12,7 +12,6 @@ jobs:
 
     steps:
       - name: Checkout
-      # Shallow clone is fine; unshallow not needed for Docker context
         uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
@@ -26,42 +25,47 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-buildx-
 
-      - name: Build (docker compose)
+      # Extract the image name/tag from docker-compose.yml
+      # Example line in compose: "image: pienviro:0.2"
+      - name: Read image from compose
+        id: meta
+        run: |
+          set -euo pipefail
+          IMAGE=$(grep -E '^[[:space:]]*image:[[:space:]]*' docker-compose.yml | head -n1 | awk '{print $2}')
+          if [ -z "${IMAGE:-}" ]; then
+            echo "No 'image:' found in docker-compose.yml" >&2
+            exit 1
+          fi
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+          echo "Resolved image: $IMAGE"
+
+      - name: Build image (docker compose)
         run: |
           docker compose build --build-arg BUILDKIT_INLINE_CACHE=1
 
-      # Package each built service image as a compressed tarball artifact
-      - name: Export images to artifacts
+      - name: Export image as artifact
         run: |
           set -euo pipefail
           mkdir -p out
-          # List services from compose file
-          services=$(docker compose config --services)
-          for s in $services; do
-            # Get image ID for the service
-            img_id=$(docker compose images --quiet "$s")
-            if [ -z "$img_id" ]; then
-              echo "No image found for service $s" >&2
-              exit 1
-            fi
-            # Derive a filename: <service>.tar.gz
-            fname="out/${s}.tar"
-            echo "Saving $s ($img_id) -> ${fname}.gz"
-            docker save -o "$fname" "$img_id"
-            gzip -9 "$fname"
-          done
+          IMAGE="${IMAGE:?missing}"
+          # Safe filename from image ref (replace ":" and "/" with "-")
+          SAFE_NAME=${IMAGE//[:\/]/-}
+          TAR="out/${SAFE_NAME}.tar"
+          echo "Saving ${IMAGE} -> ${TAR}.gz"
+          docker save -o "${TAR}" "${IMAGE}"
+          gzip -9 "${TAR}"
           ls -lh out
 
-      - name: Upload image artifacts
+      - name: Upload image artifact
         uses: actions/upload-artifact@v4
         with:
-          name: docker-images-${{ github.run_id }}
+          name: docker-image-${{ env.IMAGE }}
           path: out/*.tar.gz
           if-no-files-found: error
           compression-level: 0   # already gzipped
 
-      # Optional: also keep build logs as a small artifact
-      - name: Compose config for debugging
+      - name: Compose config (debug)
         run: docker compose config > compose.effective.yml
 
       - name: Upload compose config
