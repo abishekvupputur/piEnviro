@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: ["main"]
 
+permissions:
+  contents: write   # needed to create a release
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -26,7 +29,7 @@ jobs:
             ${{ runner.os }}-buildx-
 
       # Extract the image name/tag from docker-compose.yml
-      # Example line in compose: "image: pienviro:0.2"
+      # Example line: "image: pienviro:0.2"
       - name: Read image from compose
         id: meta
         run: |
@@ -36,12 +39,9 @@ jobs:
             echo "No 'image:' found in docker-compose.yml" >&2
             exit 1
           fi
-          # Normalized name for safe filenames/artifact names
           SAFE_IMAGE=${IMAGE//[:\/]/-}
           echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
           echo "SAFE_IMAGE=$SAFE_IMAGE" >> "$GITHUB_ENV"
-          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
-          echo "safe_image=$SAFE_IMAGE" >> "$GITHUB_OUTPUT"
           echo "Resolved image: $IMAGE -> safe: $SAFE_IMAGE"
 
       - name: Build image (docker compose)
@@ -52,8 +52,6 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p out
-          IMAGE="${IMAGE:?missing}"
-          SAFE_IMAGE="${SAFE_IMAGE:?missing}"
           TAR="out/${SAFE_IMAGE}.tar"
           echo "Saving ${IMAGE} -> ${TAR}.gz"
           docker save -o "${TAR}" "${IMAGE}"
@@ -76,3 +74,48 @@ jobs:
         with:
           name: compose-effective-${{ github.run_id }}
           path: compose.effective.yml
+
+      # -------- Pre-release publishing (pushes only) --------
+      - name: Derive release metadata
+        if: ${{ github.event_name == 'push' }}
+        id: relmeta
+        run: |
+          set -euo pipefail
+          # IMAGE like "pienviro:0.2" -> APP="pienviro", VERSION="0.2"
+          APP="${IMAGE%%:*}"
+          VERSION="${IMAGE##*:}"
+          if [ "$APP" = "$VERSION" ]; then
+            # No tag present; fallback to run number
+            VERSION="build-${{ github.run_number }}"
+          fi
+          SAFE_APP=${APP//\//-}
+          RELEASE_TAG="${SAFE_APP}-${VERSION}-pre"
+          RELEASE_NAME="Pre-release ${SAFE_APP}:${VERSION}"
+          ASSET_GLOB="out/${SAFE_IMAGE}.tar.gz"
+
+          echo "APP=$APP" >> "$GITHUB_ENV"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "RELEASE_TAG=$RELEASE_TAG" >> "$GITHUB_ENV"
+          echo "RELEASE_NAME=$RELEASE_NAME" >> "$GITHUB_ENV"
+          echo "ASSET_GLOB=$ASSET_GLOB" >> "$GITHUB_ENV"
+
+          echo "Tag: $RELEASE_TAG"
+          echo "Name: $RELEASE_NAME"
+          echo "Assets: $ASSET_GLOB"
+
+      - name: Create GitHub pre-release
+        if: ${{ github.event_name == 'push' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: ${{ env.RELEASE_NAME }}
+          body: |
+            Automated pre-release for **${{ env.IMAGE }}**
+            - Commit: ${{ github.sha }}
+            - Workflow run: ${{ github.run_id }}
+          draft: false
+          prerelease: true
+          files: |
+            ${{ env.ASSET_GLOB }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
