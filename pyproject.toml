@@ -115,7 +115,8 @@ ignore = [
     'tests/*',
     'examples/*',
     '.coveragerc',
-    'requirements-dev.txt'
+    'requirements-dev.txt',
+	 '.dockerignore'
 ]
 
 [tool.pimoroni]
