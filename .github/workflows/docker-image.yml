@@ -36,9 +36,13 @@ jobs:
             echo "No 'image:' found in docker-compose.yml" >&2
             exit 1
           fi
+          # Normalized name for safe filenames/artifact names
+          SAFE_IMAGE=${IMAGE//[:\/]/-}
           echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+          echo "SAFE_IMAGE=$SAFE_IMAGE" >> "$GITHUB_ENV"
           echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
-          echo "Resolved image: $IMAGE"
+          echo "safe_image=$SAFE_IMAGE" >> "$GITHUB_OUTPUT"
+          echo "Resolved image: $IMAGE -> safe: $SAFE_IMAGE"
 
       - name: Build image (docker compose)
         run: |
@@ -49,9 +53,8 @@ jobs:
           set -euo pipefail
           mkdir -p out
           IMAGE="${IMAGE:?missing}"
-          # Safe filename from image ref (replace ":" and "/" with "-")
-          SAFE_NAME=${IMAGE//[:\/]/-}
-          TAR="out/${SAFE_NAME}.tar"
+          SAFE_IMAGE="${SAFE_IMAGE:?missing}"
+          TAR="out/${SAFE_IMAGE}.tar"
           echo "Saving ${IMAGE} -> ${TAR}.gz"
           docker save -o "${TAR}" "${IMAGE}"
           gzip -9 "${TAR}"
@@ -60,7 +63,7 @@ jobs:
       - name: Upload image artifact
         uses: actions/upload-artifact@v4
         with:
-          name: docker-image-${{ env.IMAGE }}
+          name: docker-image-${{ env.SAFE_IMAGE }}
           path: out/*.tar.gz
           if-no-files-found: error
           compression-level: 0   # already gzipped
