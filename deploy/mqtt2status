@@ -1,0 +1,105 @@
+#!/usr/bin/env python3
+"""piEnviro → status.vupputur.cc. Runs ON piEnviro (Pi Zero 2 W at home), not on ts-relay.
+
+Subscribes to the Enviro+ readings on the Pi's own Mosquitto and pushes the latest one every 30 s
+to ts-relay's sensor ingest. That ingest is tailnet-only (tailscale serve :8430 → edge → Victoria-
+Metrics) and write-only. The data is pushed from home because ts-relay must never connect to home
+devices (tailnet policy).
+
+Install (see deploy/README.md): /usr/local/bin/mqtt2status, mqtt2status.service, and
+/etc/mqtt2status.env (root, 600) with INGEST_TOKEN = SENSOR_INGEST_TOKEN from ts-relay's
+secrets/edge.env. Needs python3-paho-mqtt (apt).
+"""
+import json
+import os
+import threading
+import time
+import urllib.request
+
+import paho.mqtt.client as mqtt
+
+BROKER = os.environ.get("MQTT_BROKER", "127.0.0.1")   # the Pi's own Mosquitto
+TOPIC = os.environ.get("MQTT_TOPIC", "sensor/environment")
+URL = os.environ.get("INGEST_URL", "http://ts-relay.tailb37fa3.ts.net:8430/api/v1/import/prometheus")
+TOKEN = os.environ["INGEST_TOKEN"]
+INTERVAL = 30    # seconds between pushes (the sensor client publishes at 2 Hz)
+MAX_AGE = 120    # don't push a reading older than this: a gap shows the sensor client stopped
+
+latest = {"data": None, "at": 0.0}
+lock = threading.Lock()
+
+
+def on_connect(client, *_):
+    client.subscribe(TOPIC)
+    print(f"connected to {BROKER}, subscribed to {TOPIC}", flush=True)
+
+
+def on_message(_client, _userdata, msg):
+    try:
+        data = json.loads(msg.payload)
+    except ValueError:
+        return
+    with lock:
+        latest["data"], latest["at"] = data, time.time()
+
+
+def to_prometheus(d: dict) -> str:
+    """The sensor client's JSON (enviroMultiClient.py) as Prometheus text; missing/None values are skipped."""
+    lines = []
+
+    def add(name, value, **labels):
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            lab = ",".join(f'{k}="{v}"' for k, v in labels.items())
+            lines.append(f"{name}{{{lab}}} {value}" if lab else f"{name} {value}")
+
+    add("pienviro_temperature_celsius", d.get("temperature"))
+    add("pienviro_raw_temperature_celsius", d.get("raw_temperature"))
+    add("pienviro_cpu_temperature_celsius", d.get("cpu_temperature"))
+    add("pienviro_humidity_percent", d.get("humidity"))
+    add("pienviro_pressure_hpa", d.get("pressure"))
+    add("pienviro_light_lux", d.get("light"))
+    for band, value in (d.get("sound_levels") or {}).items():
+        add("pienviro_noise_level", value, band=band)
+    air = d.get("air_quality") or {}
+    for key, size in (("pm1", "1"), ("pm25", "2.5"), ("pm10", "10")):
+        add("pienviro_pm_ug_m3", air.get(key), size=size)
+    for gas in ("oxidised", "reduced", "nh3"):
+        add("pienviro_gas_kohm", air.get(gas), gas=gas)
+    return "\n".join(lines) + "\n"
+
+
+def pusher():
+    ok = None   # log only when the push state changes, not every 30 s
+    while True:
+        time.sleep(INTERVAL)
+        with lock:
+            data, at = latest["data"], latest["at"]
+        if data is None or time.time() - at > MAX_AGE:
+            continue
+        req = urllib.request.Request(URL, data=to_prometheus(data).encode(), method="POST",
+                                     headers={"Authorization": f"Bearer {TOKEN}", "Content-Type": "text/plain"})
+        try:
+            urllib.request.urlopen(req, timeout=10).read()
+            if ok is not True:
+                print("pushing to ts-relay", flush=True)
+            ok = True
+        except Exception as e:  # network down, ts-relay rebooting: try again next round
+            if ok is not False:
+                print(f"push failed: {e}", flush=True)
+            ok = False
+
+
+def main():
+    try:   # paho-mqtt 2.x needs the callback API version; 1.6 (Debian bookworm) has none
+        client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+    except AttributeError:
+        client = mqtt.Client()
+    client.on_connect = on_connect
+    client.on_message = on_message
+    client.connect_async(BROKER, 1883, 60)
+    threading.Thread(target=pusher, daemon=True).start()
+    client.loop_forever(retry_first_connection=True)
+
+
+if __name__ == "__main__":
+    main()

@@ -26,7 +26,7 @@ from pms5003 import PMS5003, ReadTimeoutError as pmsReadTimeoutError
 from enviroplus import gas
 
 # ---------------------------- Configuration ----------------------------
-MQTT_BROKER = "192.168.8.236"
+MQTT_BROKER = os.environ.get("MQTT_BROKER", "127.0.0.1")   # local Mosquitto (forwards to the homelab broker)
 MQTT_PORT = 1883
 MQTT_TOPIC = "sensor/environment"
 CITY = LocationInfo("Munich", "Germany", "Europe/Berlin", 48.1351, 11.5820)

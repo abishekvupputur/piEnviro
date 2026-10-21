@@ -1,0 +1,4 @@
+# The Pi runs these files: keep Linux line endings in every checkout, Windows included.
+* text=auto eol=lf
+*.jpg binary
+*.png binary

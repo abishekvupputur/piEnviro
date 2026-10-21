@@ -1,0 +1,17 @@
+[Unit]
+Description=EnviroPlus MQTT Client
+After=network.target docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=abi
+WorkingDirectory=/home/abi/piEnviro
+ExecStart=/usr/bin/docker compose up
+ExecStop=/usr/bin/docker compose down
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+

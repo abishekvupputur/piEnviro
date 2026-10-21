@@ -2,7 +2,7 @@ services:
   enviroplus:
     build: .
     container_name: piEnviro
-    image: pienviro:0.1
+    image: pienviro:0.2
     # Access to hardware interfaces
     devices:
       - /dev/i2c-1:/dev/i2c-1
@@ -19,4 +19,11 @@ services:
     # Helpful if your example prints progress continuously
     tty: true
     restart: unless-stopped
-
+    # Publishes to the Pi's own Mosquitto (127.0.0.1:1883), which forwards to the homelab broker
+    # and feeds status.vupputur.cc (mqtt2status). Host network so 127.0.0.1 is the Pi itself.
+    network_mode: host
+    environment:
+      MQTT_BROKER: 127.0.0.1
+    # Mounted, so editing the script needs only a restart, not an image rebuild on the Pi.
+    volumes:
+      - ./examples/enviroMultiClient.py:/opt/enviroplus/examples/enviroMultiClient.py:ro

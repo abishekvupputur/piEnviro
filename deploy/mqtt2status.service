@@ -1,0 +1,16 @@
+[Unit]
+Description=piEnviro readings to status.vupputur.cc (MQTT -> ts-relay sensor ingest)
+After=network-online.target tailscaled.service mosquitto.service
+Wants=network-online.target
+
+[Service]
+EnvironmentFile=/etc/mqtt2status.env
+ExecStart=/usr/bin/python3 /usr/local/bin/mqtt2status
+Restart=always
+RestartSec=30
+DynamicUser=yes
+# The Pi has 416 MB RAM; this needs ~15 MB.
+MemoryMax=40M
+
+[Install]
+WantedBy=multi-user.target
