@@ -57,9 +57,8 @@ def to_prometheus(d: dict) -> str:
     add("pienviro_cpu_temperature_celsius", d.get("cpu_temperature"))
     add("pienviro_humidity_percent", d.get("humidity"))
     add("pienviro_pressure_hpa", d.get("pressure"))
-    add("pienviro_light_lux", d.get("light"))
-    for band, value in (d.get("sound_levels") or {}).items():
-        add("pienviro_noise_level", value, band=band)
+    # Light and noise are deliberately NOT sent: they show when someone is home, awake or away, and
+    # ts-relay is treated as untrusted. They stay on the local broker (and the homelab one).
     air = d.get("air_quality") or {}
     for key, size in (("pm1", "1"), ("pm25", "2.5"), ("pm10", "10")):
         add("pienviro_pm_ug_m3", air.get(key), size=size)

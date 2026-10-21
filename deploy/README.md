@@ -59,5 +59,6 @@ The ts-relay side (the tailnet-only, write-only ingest and the status page) live
 repo: `stacks/routes/edge/Caddyfile` and the "Sensor ingest" notes in its AGENTS.md.
 
 The pushed metrics are `pienviro_temperature_celsius`, `_raw_temperature_celsius`,
-`_cpu_temperature_celsius`, `_humidity_percent`, `_pressure_hpa`, `_light_lux`, `_noise_level{band}`,
-`_pm_ug_m3{size}` and `_gas_kohm{gas}`.
+`_cpu_temperature_celsius`, `_humidity_percent`, `_pressure_hpa`, `_pm_ug_m3{size}` and `_gas_kohm{gas}`.
+Light and noise are deliberately not pushed: they reveal when someone is home, and ts-relay is
+untrusted. They still go to the local broker and on to the homelab broker.
