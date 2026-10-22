@@ -92,6 +92,12 @@ def pusher():
         with lock:
             fresh = {t: d for t, (d, at) in latest.items() if now - at <= MAX_AGE}
         lines = [line for t, d in fresh.items() for line in CONVERTERS[t](d)]
+        # The Pi's own uptime, always: on the status page every drop to zero is a reboot or crash.
+        try:
+            with open("/proc/uptime") as f:
+                lines.append(f"pienviro_uptime_seconds {float(f.read().split()[0]):.0f}")
+        except OSError:
+            pass
         if not lines:
             continue
         req = urllib.request.Request(URL, data=("\n".join(lines) + "\n").encode(), method="POST",
