@@ -5,7 +5,7 @@ the working copy is `~/piEnviro`.
 
 ```
 enviroMultiClient.py (container "piEnviro", host network) → Mosquitto 127.0.0.1:1883 on the Pi
-   ├─ bridge "homelab" → 192.168.8.111:1883 (WeatherApp), when that answers
+   ├─ bridge "homelab" ⇄ 192.168.8.111:1883 (EMQX on bigfootpi): sensor/environment out (WeatherApp), sensor/rack in (PiAbi)
    └─ mqtt2status ── tailnet ──> ts-relay:8430 → status.vupputur.cc "Indoor"
 ```
 
@@ -59,6 +59,7 @@ The ts-relay side (the tailnet-only, write-only ingest and the status page) live
 repo: `stacks/routes/edge/Caddyfile` and the "Sensor ingest" notes in its AGENTS.md.
 
 The pushed metrics are `pienviro_temperature_celsius`, `_raw_temperature_celsius`,
-`_cpu_temperature_celsius`, `_humidity_percent`, `_pressure_hpa`, `_pm_ug_m3{size}` and `_gas_kohm{gas}`.
+`_cpu_temperature_celsius`, `_humidity_percent`, `_pressure_hpa`, `_pm_ug_m3{size}` and `_gas_kohm{gas}`,
+plus `rack_temperature_celsius` and `rack_humidity_percent` from the rack sensor (sensor/rack).
 Light and noise are deliberately not pushed: they reveal when someone is home, and ts-relay is
 untrusted. They still go to the local broker and on to the homelab broker.

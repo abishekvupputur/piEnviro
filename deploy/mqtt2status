@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """piEnviro → status.vupputur.cc. Runs ON piEnviro (Pi Zero 2 W at home), not on ts-relay.
 
-Subscribes to the Enviro+ readings on the Pi's own Mosquitto and pushes the latest one every 30 s
-to ts-relay's sensor ingest. That ingest is tailnet-only (tailscale serve :8430 → edge → Victoria-
+Subscribes to the Enviro+ readings (sensor/environment) and the rack sensor (sensor/rack, PiAbi's
+BME280, which the Pi's Mosquitto bridge pulls in from the homelab broker) on the Pi's own Mosquitto,
+and pushes the latest reading of each every 30 s to ts-relay's sensor ingest. That ingest is tailnet-only (tailscale serve :8430 → edge → Victoria-
 Metrics) and write-only. The data is pushed from home because ts-relay must never connect to home
 devices (tailnet policy).
 
@@ -19,19 +20,19 @@ import urllib.request
 import paho.mqtt.client as mqtt
 
 BROKER = os.environ.get("MQTT_BROKER", "127.0.0.1")   # the Pi's own Mosquitto
-TOPIC = os.environ.get("MQTT_TOPIC", "sensor/environment")
 URL = os.environ.get("INGEST_URL", "http://ts-relay.tailb37fa3.ts.net:8430/api/v1/import/prometheus")
 TOKEN = os.environ["INGEST_TOKEN"]
-INTERVAL = 30    # seconds between pushes (the sensor client publishes at 2 Hz)
-MAX_AGE = 120    # don't push a reading older than this: a gap shows the sensor client stopped
+INTERVAL = 30    # seconds between pushes (the sensors publish every 0.5-2 s)
+MAX_AGE = 120    # don't push a reading older than this: a gap shows that sensor stopped
 
-latest = {"data": None, "at": 0.0}
+latest = {}      # topic -> (data, received at)
 lock = threading.Lock()
 
 
 def on_connect(client, *_):
-    client.subscribe(TOPIC)
-    print(f"connected to {BROKER}, subscribed to {TOPIC}", flush=True)
+    for topic in CONVERTERS:
+        client.subscribe(topic)
+    print(f"connected to {BROKER}, subscribed to {', '.join(CONVERTERS)}", flush=True)
 
 
 def on_message(_client, _userdata, msg):
@@ -40,18 +41,21 @@ def on_message(_client, _userdata, msg):
     except ValueError:
         return
     with lock:
-        latest["data"], latest["at"] = data, time.time()
+        latest[msg.topic] = (data, time.time())
 
 
-def to_prometheus(d: dict) -> str:
-    """The sensor client's JSON (enviroMultiClient.py) as Prometheus text; missing/None values are skipped."""
-    lines = []
-
+def _adder(lines: list):
     def add(name, value, **labels):
         if isinstance(value, (int, float)) and not isinstance(value, bool):
             lab = ",".join(f'{k}="{v}"' for k, v in labels.items())
             lines.append(f"{name}{{{lab}}} {value}" if lab else f"{name} {value}")
+    return add
 
+
+def environment(d: dict) -> list:
+    """The sensor client's JSON (enviroMultiClient.py) as Prometheus lines; missing/None values are skipped."""
+    lines = []
+    add = _adder(lines)
     add("pienviro_temperature_celsius", d.get("temperature"))
     add("pienviro_raw_temperature_celsius", d.get("raw_temperature"))
     add("pienviro_cpu_temperature_celsius", d.get("cpu_temperature"))
@@ -64,18 +68,33 @@ def to_prometheus(d: dict) -> str:
         add("pienviro_pm_ug_m3", air.get(key), size=size)
     for gas in ("oxidised", "reduced", "nh3"):
         add("pienviro_gas_kohm", air.get(gas), gas=gas)
-    return "\n".join(lines) + "\n"
+    return lines
+
+
+def rack(d: dict) -> list:
+    """PiAbi's rack sensor ({"temperature_c", "humidity_pct", "pressure_hpa"}); pressure is the room's anyway."""
+    lines = []
+    add = _adder(lines)
+    add("rack_temperature_celsius", d.get("temperature_c"))
+    add("rack_humidity_percent", d.get("humidity_pct"))
+    return lines
+
+
+# topic -> converter. ts-relay's ingest accepts only the pienviro_* and rack_* families.
+CONVERTERS = {"sensor/environment": environment, "sensor/rack": rack}
 
 
 def pusher():
     ok = None   # log only when the push state changes, not every 30 s
     while True:
         time.sleep(INTERVAL)
+        now = time.time()
         with lock:
-            data, at = latest["data"], latest["at"]
-        if data is None or time.time() - at > MAX_AGE:
+            fresh = {t: d for t, (d, at) in latest.items() if now - at <= MAX_AGE}
+        lines = [line for t, d in fresh.items() for line in CONVERTERS[t](d)]
+        if not lines:
             continue
-        req = urllib.request.Request(URL, data=to_prometheus(data).encode(), method="POST",
+        req = urllib.request.Request(URL, data=("\n".join(lines) + "\n").encode(), method="POST",
                                      headers={"Authorization": f"Bearer {TOKEN}", "Content-Type": "text/plain"})
         try:
             urllib.request.urlopen(req, timeout=10).read()
