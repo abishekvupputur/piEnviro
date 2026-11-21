@@ -15,6 +15,8 @@ enviroMultiClient.py (container "piEnviro", host network) → Mosquitto 127.0.0.
 | `pienviro.service` | `/etc/systemd/system/` | runs `docker compose up` in `~/piEnviro` at boot |
 | `mosquitto/pienviro.conf` | `/etc/mosquitto/conf.d/` | local broker on 127.0.0.1 only, forwards `sensor/environment` to the homelab broker |
 | `mqtt2status`, `mqtt2status.service` | `/usr/local/bin/`, `/etc/systemd/system/` | pushes the latest reading every 30 s to status.vupputur.cc |
+| `systemd/journald-persistent.conf` | `/etc/systemd/journald.conf.d/` | journal kept across reboots (50 MB cap), so a freeze leaves its last messages: `journalctl -b -1 -k` |
+| `systemd/watchdog.conf` | `/etc/systemd/system.conf.d/` | systemd pets the hardware watchdog; a hang of 15 s resets the Pi |
 
 ## How changes flow
 
@@ -35,6 +37,10 @@ cd ~/piEnviro/deploy
 sudo install -m 644 pienviro.service mqtt2status.service /etc/systemd/system/
 sudo install -m 755 mqtt2status /usr/local/bin/
 sudo install -m 644 mosquitto/pienviro.conf /etc/mosquitto/conf.d/
+sudo install -D -m 644 systemd/journald-persistent.conf -t /etc/systemd/journald.conf.d/
+sudo install -D -m 644 systemd/watchdog.conf -t /etc/systemd/system.conf.d/
+sudo systemctl restart systemd-journald && sudo journalctl --flush
+sudo systemctl daemon-reexec          # picks up the watchdog setting
 sudo systemctl daemon-reload && sudo systemctl restart mosquitto mqtt2status pienviro
 ```
 
